@@ -7,6 +7,6 @@ falldeteciton.csv - The raw dat in .csv format
 
 OwnProj.pdf - The report in PDF format
 
-OwnProj.rm - The report in Rmd format
+OwnProj.Rmd - The report in Rmd format
 
 OwnProj.R - The R script that generates the predicted activity type and accuracy
