@@ -1,0 +1,629 @@
+---
+title: "Daily Activity Classification"
+author: "C.Zhou"
+date: "27/07/2020"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Overview
+Machine learning can be used to predict both continuous and categorical outcomes. The previous MovieLens project is a regression task to predict continuous outcomes (ratings of movies). Different from the MovieLens project, this project is a classification task to predict categorical outcomes (daily activity type). A more detailed description of this project is as follow.
+
+## Goal
+The object of this project is to distinguish different daily activity types based on biometric indicators. This project's goal is slightly different from the target in the description of the dataset because the dataset downloaded did not contain all the data mentioned in the data description (e.g., it mentioned 16 activities of daily living, but there are only six types in the dataset). The original goal mentioned in the data description was to classify different movements measured by wearable sensors to detect the time when someone is about to fall and then help prevent falling over. As the dataset available only contains biometric indicators and monitoring time as predictors, it is impossible to classify the activity types based on the physical data measured by tri-axial devices (accelerometer, gyroscope, and magnetometer/compass). Therefore, we will make use of the available predictors to distinguish the activity type instead.
+## Dataset and Variables
+The raw data (falldeteciton dataset) used in this project can be obtained from:
+<https://www.kaggle.com/pitasr/falldata/download>
+
+This falldeteciton dataset contains 16382 observations of patients of 65-year old and above in Chinese hospitals. 
+
+|   The dependent variable (DV) is: 
+
+|       ACTIVITY: six types of daily activities coded as "0 = Standing", "1 = Walking", "2 = Sitting", "3 = Falling", "4 = Cramps", "5 = Running"  
+
+|   The independent variables (IVs) are:
+
+|       **TIME**: monitoring time
+
+|       **SL**: sugar level
+
+|       **EEG**: EEG monitoring rate
+
+|       **BP**: Blood pressure
+
+|       **HR**: Heart beat rate
+
+|       **CIRCLUATION**: Blood circulation.
+
+We will then use the 6 IVs mentioned above to predict rating (the only DV).  
+
+## Key Steps  
+The following steps were carried out to determine the model that predicts the types of activity most accurately:  
+
+|   **Step 1.** Load the data and split data sets.  
+|   **Step 2.** Inspect the data to select the useful predictors, including visualizing the distribution of variables and exploring the correlation between variables.
+|   **Step 3.** Several models were trained on the test data set to find out the model that maximizes accuracy, including k-nearest neighbors (kNN), decision trees, and random forest. Techniques, such as tuning parameter and cross-validation, were also applied to improve the models.  
+|   **Step 4.** The final algorithm was tested on the validation set. The overall accuracy and ROC curve were reported as indicators of how well the predicted activity type match the real activity type based on the final model. 
+
+# Analysis
+
+## Step 1. Create the Train and the Validation Datasets
+
+### 1.1 Load packages
+```{r Loading the packages, warning=FALSE, error=FALSE, message=FALSE}
+# data wrangling
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+#dataframe manipulation
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org") 
+#machine learning
+if(!require(caret)) install.packages("caret", repos = "httpggthemes://cran.us.r-project.org")
+#inspect missing data
+if(!require(varhandle)) install.packages("varhandle", repos = "http://cran.us.r-project.org") 
+#data description
+if(!require(dslabs)) install.packages("dslabs", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+#to ensure labels donât fall on top of each other. 
+if(!require(ggrepel)) install.packages("ggrepel", repos = "http://cran.us.r-project.org") 
+```
+### 1.2 Import data & create train/valid data set
+```{r ,warning=FALSE, error=FALSE, message=FALSE}
+#Importing the data
+fall <- read.csv("falldeteciton.csv") %>% mutate(ACTIVITY = as.factor(ACTIVITY))
+levels(fall$ACTIVITY) <- c("Standing", "Walking", "Sitting", "Falling", "Cramps", "Running")
+summary(fall) #summary of the data
+names(fall) # the top 6rows of the data
+
+#Based on the Pareto principle, a ratio of 80:20 (train: validation) was used to split the raw data set.
+set.seed(2020)
+test_index <- createDataPartition(y = fall$ACTIVITY, times = 1, p = 0.2, list = FALSE)
+trainset <- fall[-test_index,]
+validset <- fall[test_index,]
+summary(validset)
+```
+
+## Step 2. Data visualization
+```{r packages, warning=FALSE, error=FALSE, message=FALSE}
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(graphics)) install.packages("graphics", repos = "http://cran.us.r-project.org")
+```
+### 2.1 distribution of each variable
+```{r , include=FALSE}
+```
+#### 2.1.1 distribution of activity type
+```{r distribution of activity type}
+trainset %>% 
+  ggplot(aes(ACTIVITY)) +
+  geom_bar(color="cornflowerblue", fill="darkblue")+   
+  ggtitle("Distribution of Acitivity") +
+  labs(y = "Counts", x = "Activity Type") 
+```
+#### 2.1.2 histogram of TIME
+```{r histogram of TIME}
+trainset%>% 
+  ggplot(aes(TIME)) + 
+  geom_histogram(color="cornflowerblue", fill="darkblue") +
+  scale_x_log10() +
+  ggtitle("Distribution of Time") +
+  labs(y = "Counts", x = "Time Value") 
+```
+#### 2.1.3 histogram of SL
+```{r histogram of SL}
+trainset%>% 
+  ggplot(aes(SL)) + 
+  geom_histogram(color="cornflowerblue", fill="darkblue") +
+  scale_x_log10() +
+  ggtitle("Distribution of Sugar Level") +
+  labs(y = "Counts", x ="Sugar Level") 
+```
+#### 2.1.4 histogram of EEG
+```{r histogram of EEG}
+trainset%>% 
+  ggplot(aes(EEG)) + 
+  geom_histogram(color="cornflowerblue", fill="darkblue") +
+  scale_x_log10() +
+  ggtitle("Distribution of EEG Rate") +
+  labs(y = "Counts", x = "EEG Rate") 
+```
+#### 2.1.5 histogram of Blood Pressure
+```{r histogram of Blood Pressure, warning=FALSE, error=FALSE, message=FALSE}
+trainset%>% 
+  ggplot(aes(BP)) + 
+  geom_histogram(color="cornflowerblue", fill="darkblue") +
+  scale_x_log10() +
+  ggtitle("Distribution of Blood Pressure") +
+  labs(y = "Counts", x = "Blood Pressure Level") 
+```
+#### 2.1.6 histogram of Heart Rate
+```{r histogram of Heart Rate, warning=FALSE, error=FALSE, message=FALSE}
+trainset%>% 
+  ggplot(aes(HR)) + 
+  geom_histogram(color="cornflowerblue", fill="darkblue") +
+  scale_x_log10() +
+  ggtitle("Distribution of Heart Rate") +
+  labs(y ="Counts", x =  "Heart Rate") 
+```
+#### 2.1.7 histogram of Blood Circulation
+```{r histogram of Blood Circulation, warning=FALSE, error=FALSE, message=FALSE}
+trainset%>% 
+  ggplot(aes(CIRCLUATION)) + 
+  geom_histogram(color="cornflowerblue", fill="darkblue") +
+  scale_x_log10() +
+  ggtitle("Distribution of Blood Circulation") +
+  labs(y = "Counts", x = "Blood Circulation Rate") 
+```
+### 2.2 plot the correlation between variables
+```{r package, warning=FALSE, error=FALSE, message=FALSE}
+# to make correlation plots
+if(!require(corrplot)) install.packages("corrplot", repos = "http://cran.us.r-project.org")
+ # to change themes in plot
+if(!require(ggthemes)) install.packages("ggthemes", repos = "http://cran.us.r-project.org")
+# to change the theme color
+if(!require(RColorBrewer)) install.packages("RColorBrewer", repos ="http://cran.us.r-project.org")
+```
+The MANOVA test showed that different activity types were significantly different on all variable (TIME, SL, EEG, BP, HR, CIRCLUATION).  We will then visualize the type difference based on plots.
+```{r MONOVA}
+maov <- manova(cbind(TIME, SL, EEG, BP, HR, CIRCLUATION) ~ ACTIVITY, data = trainset)
+summary.aov(maov)
+```
+#### 2.2.1 TIME VS activity
+Time differs significantly among activity types, except Running-Cramps.
+```{r ANOVA Post-hoc Test (TIME)}
+Taov <- aov(TIME ~ ACTIVITY, data = trainset)
+TukeyHSD(Taov)
+```
+2.2.1.1 boxplot
+```{r boxplot (TIME)}
+trainset%>% mutate(TIME_=TIME/1000) %>%
+  ggplot(aes(ACTIVITY, TIME_)) + 
+  labs(y = "Time (10^3s)", x = "Activity") +
+  geom_boxplot()
+```
+2.2.1.2 bar plot
+```{r bar plot (TIME)}
+trainset %>%
+  na.omit() %>%
+  group_by(ACTIVITY) %>% # group data by activity 
+  summarise(M_TIME = mean(TIME)) %>% # mean time
+  ggplot(aes(x = ACTIVITY, y = M_TIME)) +
+  geom_bar(stat = "identity", fill="cornflowerblue",color="darkblue") + 
+  labs(y = "Time (s)", x = "Activity") +
+  ggtitle("Time VS Activity") 
+```
+2.2.1.3 histogram
+```{r histogram (TIME)}
+trainset %>% ggplot(aes(x = TIME, fill = ACTIVITY)) +
+  geom_histogram(bins = 200) +
+  ggtitle("Time") +
+  facet_wrap(~ACTIVITY, ncol = 2) 
+```
+#### 2.2.2 Sugar Level VS Activity
+Sugar level differs significantly among activity types, except Running-Sitting and Cramps-Falling.
+```{r ANOVA Post-hoc Test (SL)}
+SLaov <- aov(SL ~ ACTIVITY, data = trainset)
+TukeyHSD(SLaov)
+```
+2.2.2.1 boxplot
+```{r boxplot (SL)}
+trainset%>% 
+  mutate(SL_=SL/100000)%>%
+  ggplot(aes(ACTIVITY, SL_)) +
+  labs(y = "Sugar Level (10^5mg/dL)", x = "Activity") +
+  geom_boxplot()
+```
+2.2.2.2 bar plot
+```{r bar plot (SL)}
+trainset %>%
+  na.omit() %>%
+  group_by(ACTIVITY) %>% # group data by activity 
+  summarise(M_SL = mean(SL)/1000) %>% # mean SL
+  ggplot(aes(x = ACTIVITY, y = M_SL)) +
+  geom_bar(stat = "identity", fill="cornflowerblue",color="darkblue") + 
+  labs(y = "Sugar Level (10^3mg/dL)", x = "Activity") +
+  ggtitle("Sugar Level  VS Activity") 
+```
+2.2.2.3 histogram
+```{r histogram (SL)}
+trainset %>%  mutate(SL=SL/100000)%>%
+  ggplot(aes(x = SL, fill = ACTIVITY)) +
+  geom_histogram(bins = 200) +
+  ggtitle("Sugar Level") +
+  labs(x = "Sugar Level (10^5mg/dL)")+
+  facet_wrap(~ACTIVITY, ncol = 2) 
+```
+#### 2.2.3 EEG VS activity
+Heart rate differs significantly among activity types, except Running-Cramps.
+```{r ANOVA Post-hoc Test (EEG)}
+HRaov <- aov(HR ~ ACTIVITY, data = trainset)
+TukeyHSD(HRaov)
+```
+2.2.3.1 boxplot
+```{r boxplot (EEG)}
+trainset%>% 
+  mutate(EEG_ = EEG*(-10^-6)) %>%
+  ggplot(aes(ACTIVITY, EEG_)) +
+  labs(y = "EEG (-10^6mV)", x = "Activity") +
+  geom_boxplot()
+```
+2.2.3.2 bar plot
+```{r bar plot (EEG)}
+trainset %>%
+  na.omit() %>%
+  group_by(ACTIVITY) %>% # group data by activity 
+  summarise(M_EEG = mean(EEG*(-1))) %>% # mean EEG
+  ggplot(aes(x = ACTIVITY, y = M_EEG)) +
+  geom_bar(stat = "identity", fill="cornflowerblue",color="darkblue") + 
+  labs(y = "EEG (-mV)", x = "Activity") +
+  ggtitle("EEG  VS Activity") 
+```
+2.2.3.3 histogram
+```{r histogram (EEG)}
+trainset %>% ggplot(aes(x = EEG, fill = ACTIVITY)) +
+  geom_histogram(bins = 200) +
+  ggtitle("EEG") +
+  facet_wrap(~ACTIVITY, ncol = 2) 
+```
+#### 2.2.4 Blood Pressure VS Activity
+Blood pressure differs significantly among activity types, except Running-Cramps.
+```{r ANOVA Post-hoc Test (BP)}
+BPaov <- aov(BP ~ ACTIVITY, data = trainset)
+TukeyHSD(BPaov)
+```
+2.2.4.1 boxplot
+```{r boxplot (BP)}
+trainset%>% 
+  ggplot(aes(ACTIVITY, BP)) +
+  geom_boxplot()
+```
+2.2.4.2 barplot (with error bar)
+```{r bar plot (BP)}
+trainset %>%
+  na.omit() %>%
+  group_by(ACTIVITY) %>% # group data by activity 
+  summarise(M_BP = mean(BP), sd = sd(BP) ) %>% # count
+  ggplot(aes(x = ACTIVITY, y = M_BP)) +
+  geom_bar(stat = "identity", fill="cornflowerblue",color="darkblue") + 
+  geom_errorbar(aes(ymin=M_BP-sd, ymax=M_BP+sd),
+                width=0.4, colour="darkblue", alpha=0.9, size=1)+
+  labs(y = "Blood Pressure", x = "Activity") +
+  ggtitle("Blood Pressure VS Activity")
+```
+2.2.4.3 histogram
+```{r histogram (BP)}
+trainset %>% ggplot(aes(x = BP, fill = ACTIVITY)) +
+  geom_histogram(bins = 200) +
+  ggtitle("Blood Pressure") +
+  facet_wrap(~ACTIVITY, ncol = 2) 
+```
+#### 2.2.5 Heart Rate VS Activity
+Heart rate differs significantly among activity types, except Running-Cramps.
+```{r ANOVA Post-hoc Test (HR)}
+HRaov <- aov(HR ~ ACTIVITY, data = trainset)
+TukeyHSD(HRaov)
+```
+2.2.5.1 boxplot
+```{r boxplot (HR)}
+trainset%>% 
+  ggplot(aes(ACTIVITY, HR)) +
+  geom_boxplot()
+```
+2.2.5.2 barplot (with error bar)
+```{r barplot (HR)}
+trainset %>%
+  na.omit() %>%
+  group_by(ACTIVITY) %>% # gHRroup data by activity 
+  summarise(M_HR = mean(HR), sd = sd(HR)) %>% # count
+  ggplot(aes(x = ACTIVITY, y = M_HR)) +
+  geom_bar(stat = "identity", fill="cornflowerblue",color="darkblue") + 
+  geom_errorbar(aes(ymin=M_HR-sd, ymax=M_HR+sd), 
+                width=0.4, colour="darkblue", alpha=0.9, size=1)+
+  labs(y = "Heart Rate", x = "Activity") +
+  ggtitle("Heart Rate VS Activity")
+```
+2.2.5.3 histogram
+```{r histogram (HR)}
+trainset %>% ggplot(aes(x = HR, fill = ACTIVITY)) +
+  geom_histogram(bins = 200) +
+  ggtitle("Heart Rate") +
+  facet_wrap(~ACTIVITY, ncol = 2) 
+```
+#### 2.2.6 Circulation VS Activity
+Blood circulation level differs significantly among activity types, except Running-Sitting and Cramps-Falling.
+```{r ANOVA TEST (CIR)}
+CIRaov <- aov(CIRCLUATION ~ ACTIVITY, data = trainset)
+TukeyHSD(CIRaov)
+```
+2.2.6.1 boxplot
+```{r boxplot (CIR)}
+trainset%>% 
+  ggplot(aes(ACTIVITY, CIRCLUATION)) +
+  geom_boxplot()
+```
+2.2.6.2 barplot (with error bar)
+```{r barplot (CIR)}
+trainset %>%
+  na.omit() %>%
+  group_by(ACTIVITY) %>% # group data by activity 
+  summarise(M_CIRCLUATION = mean(CIRCLUATION), sd = sd(CIRCLUATION) ) %>% # count
+  ggplot(aes(x = ACTIVITY, y = M_CIRCLUATION)) +
+  geom_bar(stat = "identity", fill="cornflowerblue",color="darkblue") + 
+  geom_errorbar(aes(ymin=M_CIRCLUATION-sd, ymax=M_CIRCLUATION+sd), 
+                width=0.4, colour="darkblue", alpha=0.9, size=1)+
+  labs(y = "Circulation", x = "Activity") +
+  ggtitle("Circulation VS Activity")
+```
+/*2.2.6.3 barplot (without error bar)*/
+```{r barplot (CIR no ERROR BAR), include=FALSE }
+trainset %>%
+  na.omit() %>%
+  group_by(ACTIVITY) %>% # group data by year 
+  summarise(M_CIRCLUATION = mean(CIRCLUATION), sd = sd(CIRCLUATION) ) %>% # count
+  ggplot(aes(x = ACTIVITY, y = M_CIRCLUATION)) +
+  geom_bar(stat = "identity", fill="cornflowerblue",color="darkblue") + 
+  labs(y = "Circulation", x = "Activity") +
+  ggtitle("Circulation VS Activity") 
+```
+2.2.6.4 histogram
+```{r histogram (CIR)}
+trainset %>% mutate(CIRCLUATION = CIRCLUATION/1000) %>%
+  ggplot(aes(x = CIRCLUATION, fill = ACTIVITY)) +
+  geom_histogram(bins = 200) +
+  ggtitle("Circulation ") +
+  labs(x = "Circulation (*10^3)") +
+  facet_wrap(~ACTIVITY, ncol = 2) 
+```
+#### 2.2.7 Correlation Plots of Variables  
+Only EEG shows a weak negative correlation with other variables. Time, SL, BP, HR, and Circulation are positively correlated with each other. 
+2.2.7.1 Correlation plot 1. 
+```{r CORRELTION plot 1 of variables}
+pairs(trainset)
+correlation <- cor(trainset[,2:7])
+correlation
+```
+2.2.7.2 Correlation plot2.
+```{r correlation plot}
+corrplot.mixed(correlation, lower.col = "black",upper = "ellipse", 
+               order = "alphabet", number.cex = 1,  
+               tl.col = "black", sig.level = .05, insig = "blank")  
+```     
+
+## Step 3 Model Training
+As the previous step showed that when people doing different activities, their biometric indicators were different in most cases. Therefore, we will include all six indicators in the model to predict the activity type.
+```{r load package, warning=FALSE, error=FALSE, message=FALSE}
+#main package for machine learning algorithms
+if(!require(randomForest)) install.packages("randomForest", repos ="http://cran.us.r-project.org")
+#working with functions, e.g. using map_df function to pick k in knn
+if(!require(purrr)) install.packages("purrr", repos = "http://cran.us.r-project.org")
+```
+### 3.0 Preproccessing
+```{r preprocess}
+if(!require(matrixStats)) install.packages("matrixStats", repos = "http://cran.us.r-project.org")
+
+y<-as.factor(trainset$ACTIVITY)
+x<-as.matrix(trainset[,2:7])
+y.v<- as.factor(validset$ACTIVITY)
+x.v<-validset[,2:7]
+
+sds <- colSds(x)
+qplot(sds, bins = 256) #one feature with 0 variability
+
+nzv <- nearZeroVar(x) #none variables is recommended to be removed
+col_index <- setdiff(1:ncol(x), nzv)
+length(col_index) #we will keep all six variables in the model training session
+
+# image(matrix(1:6 %in% nzv)) 
+# no need to check the image any more as it is an empty image.
+```
+### Preprocess Visualizing the categorization
+```{r }
+
+index_train <- createDataPartition(y, p=0.8, list = FALSE)
+```
+### 3.1 KNN  
+#### 3.1.1 Raw KNN Model
+The KNN model produced an accuracy of .637 on the validation data set.
+```{r KNN1, warning=FALSE, error=FALSE, message=FALSE}
+set.seed(2020)
+
+train_knn <- train(ACTIVITY ~ ., method = "knn", data = trainset,
+                   tuneGrid = data.frame(k = seq(1, 71, 2)), #Tuning the k value
+                     trControl = trainControl(method="cv", number = 5))
+
+ggplot(train_knn, highlight =  TRUE) #display where the max Overall accuracy is
+
+y_hat_knn <- predict(train_knn, trainset)
+Accuracy1 <- confusionMatrix(y_hat_knn, trainset$ACTIVITY)$overall["Accuracy"]
+#test knn model on validation dataset
+y_hat_knn <- predict(train_knn, validset)
+Accuracy2 <- confusionMatrix(y_hat_knn, validset$ACTIVITY)$overall["Accuracy"]
+
+tb.KNN.M1 <- data.frame(Model = "KNN", Accuracy.train = Accuracy1, Accuracy.test = Accuracy2)
+tb.KNN.M1
+```
+#### 3.1.2 KNN Model using knn3 function
+Using the knn3 fuction, we got an accuracy of .649 on the validation dataset.
+```{r KNN3 function, warning=FALSE, error=FALSE, message=FALSE}
+set.seed(2020)
+train_knn <- knn3(ACTIVITY ~ ., data = trainset)
+
+y_hat_knn <- predict(train_knn, trainset, type = "class")
+Accuracy1 <- confusionMatrix(y_hat_knn, trainset$ACTIVITY)$overall["Accuracy"]
+
+y_hat_knn <- predict(train_knn, validset, type = "class")
+Accuracy2 <- confusionMatrix(y_hat_knn, validset$ACTIVITY)$overall["Accuracy"]
+
+tb.KNN.M2 <- data.frame(Model = "KNN3", Accuracy.train = Accuracy1, Accuracy.test = Accuracy2)
+tb.KNN.M2
+```
+
+
+```{r tunned KNN3, include=FALSE}
+set.seed(2020)
+ks <- seq(3,251,2)
+
+accuracy <- map_df(ks, function(k){
+  fit <- knn3(ACTIVITY ~ ., data = trainset, k = k)
+  
+  y_hat <- predict(fit, trainset, type = "class")
+  cm_train <- confusionMatrix(y_hat, trainset$ACTIVITY)
+  train_error <- cm_train$overall["Accuracy"]
+  
+  y_hat <- predict(fit, validset, type = "class")
+  cm_test <- confusionMatrix(y_hat,validset$ACTIVITY)
+  test_error <- cm_test$overall["Accuracy"]
+  
+  tibble(train = train_error, test = test_error)
+})
+#the accuracy of the train is higher than that of test, which indicates an overtraining of the model.
+plot(ks, accuracy$train, col = "red")
+plot(ks, accuracy$test, col = "green")
+
+ks[which.max(accuracy$train)] #pick the k maximize the accuracy k=3
+max(accuracy$train) #display the max Overall accuracy of train model (.8023353)
+```
+
+```{r test tunned KNN3,include=FALSE}
+set.seed(2020)
+fit <- knn3(ACTIVITY ~ ., data = trainset, k = 3)
+y_hat <- predict(fit, validset, type = "class")
+Accuracy <- confusionMatrix(y_hat,validset$ACTIVITY)$overall["Accuracy"]
+confusionMatrix(y_hat,validset$ACTIVITY)
+tb.KNN2 <- data.frame(Model = "tuned KNN", Accuracy = Accuracy)
+tb.KNN2
+```
+### 3.2 Regression Tree
+The overall accuracy of regression tree model is .417 on validation dataset.
+```{r Train model RT, warning=FALSE, error=FALSE, message=FALSE}
+set.seed(2020)
+#end up with 9 partition
+library(rpart)
+trainset$ACTIVITY <- as.factor(trainset$ACTIVITY)
+train_rpart <- rpart(ACTIVITY ~ ., data = trainset)
+plot(train_rpart, margin = 0.1)
+text(train_rpart, cex = 0.75)
+
+y_hat <- predict(train_rpart, trainset, type = "class")
+Accuracy1 <- confusionMatrix(y_hat, trainset$ACTIVITY)$overall["Accuracy"] 
+#test RT model on validation set
+y_hat <- predict(train_rpart, validset, type = "class")
+Accuracy2 <- confusionMatrix(y_hat, validset$ACTIVITY)$overall["Accuracy"] 
+
+tb.RT <- data.frame(Model = "Regression Tree", Accuracy.train = Accuracy1, Accuracy.test = Accuracy2)
+tb.RT
+```
+### 3.3 Classification Tree
+The overall accuracy of classification tree model is .676.
+```{r use cross validation to choose cp, include=FALSE}
+set.seed(2020)
+train_rpart.t <- train(ACTIVITY ~ .,
+                     method = "rpart",
+                     tuneGrid = data.frame(cp = seq(0.0, 0.1, len = 25)), #Tuning the cp value
+                     trControl = trainControl(method="cv", number = 5),
+                     data = trainset)
+ggplot(train_rpart.t)
+
+y_hat <- predict(train_rpart.t, trainset)
+Accuracy1 <- confusionMatrix(y_hat, trainset$ACTIVITY)$overall["Accuracy"] 
+#test on validation dataset
+y_hat <- predict(train_rpart.t, validset)
+Accuracy2 <- confusionMatrix(y_hat, validset$ACTIVITY)$overall["Accuracy"] 
+
+tb.CT <- data.frame(Model = "Classification Tree", Accuracy.train = Accuracy1, Accuracy.test = Accuracy2)
+tb.CT
+```
+
+### 3.4 Rrandom Forest  
+```{r RF, warning=FALSE, error=FALSE, message=FALSE}
+set.seed(2020)
+
+control <- trainControl(method="cv", number = 5) #5 fold validation
+grid <- data.frame(mtry = seq(1,6,1)) #try different value of mtry
+train_rf <-  train(x, y, 
+                   method = "rf", 
+                   ntree = 350,
+                   trControl = control,
+                   tuneGrid = grid,
+                   nSamp = "best")
+
+Pre<-predict(train_rf, x)
+rfresults<-confusionMatrix(Pre,y) #Accuracy of Falling = .8162 
+Accuracy1 <- confusionMatrix(Pre,y)$overall["Accuracy"] #.9950393  
+#confusionMatrix(Pre,y)$byClass[7] #F1 = .9834535
+ggplot(train_rf, highlight=TRUE)
+train_rf$bestTune #mtry=2
+```
+
+# Results 
+## Step 4 Model Test
+The final random forest model made a fairly accurate prediction (.772) with a substantial Kappa value of 0.713 (Landis & Koch, 1977).
+```{r final rf model, warning=FALSE, error=FALSE, message=FALSE}
+set.seed(2020)
+rf <- randomForest(x, y, mtry=2)
+# the changes as we add trees.
+
+plot(rf) # increasing the number of trees improves the accuracy (decrease the error rate of the algorithm)until about 30 trees where accuracy stabilizes.
+pre<- predict(rf, x.v)
+confusionMatrix(pre,y.v) 
+
+Accuracy2 <- confusionMatrix(pre,y.v)$overall["Accuracy"] #Accuracy = .7715767  
+#confusionMatrix(pre,y.v)$byClass[7] #F1 = .9813322
+tb.RF <- data.frame(Model = "Random Forest", Accuracy.train = Accuracy1, Accuracy.test = Accuracy2)
+tb.RF
+```
+
+Table of the accuracy of models:
+Although cross-validation was applied in the model training process, overtraining is still a significant problem as the table shows that all accuracy values of the training models are higher than that of test models. 
+```{r}
+rbind(tb.RT, tb.CT, tb.KNN.M1, tb.KNN.M2, tb.RF)
+```
+The ROC plot shows that the curves are closer to the top-left corner indicating the trade-off between sensitivity(true positive rate) and specificity (true negative rate) is good.
+```{r ROC plot, warning=FALSE, error=FALSE, message=FALSE}
+set.seed(2020)
+#ROC plot FOR RANDOM FOREST
+if(!require(ROCR)) install.packages("ROCR", repos = "http://cran.us.r-project.org")
+# Perform training:
+rf_classifier = randomForest(ACTIVITY ~ ., data=trainset,
+                             mtry=2, importance=TRUE)
+varImpPlot(rf_classifier)
+rf_classifier
+# Validation set assessment #1: looking at confusion matrix
+prediction_for_table <- predict(rf_classifier, validset[,-1])
+table(validset$ACTIVITY,predicted=prediction_for_table)
+# Calculate the probability of new observations belonging to each class
+# prediction_for_roc_curve will be a matrix with dimensions data_set_size x number_of_classes
+prediction_for_roc_curve <- predict(rf_classifier,validset[,-1],type="prob")
+# Use pretty colours:
+pretty_colours <- c("blue","red","green", "yellow","pink", "purple")
+# Specify the different classes 
+classes <- levels(validset[,1])
+# For each class
+for (i in 1:6){
+  # Define which observations belong to class[i]
+  true_values <- ifelse(validset[,1]==classes[i],1,0)
+  # Assess the performance of classifier for class[i]
+  pred <- prediction(prediction_for_roc_curve[,i],true_values)
+  perf <- performance(pred, "tpr", "fpr")
+  if (i==1)
+  {
+    plot(perf,main="ROC Curve",col=pretty_colours[i]) 
+  }
+  else
+  {
+    plot(perf,main="ROC Curve",col=pretty_colours[i],add=TRUE) 
+  }
+  # Calculate the AUC and print it to screen (FALLING .9597418)
+  auc.perf <- performance(pred, measure = "auc")
+  print(auc.perf@y.values)
+  abline(a=0,b=1,lwd=2,lty=2,col="gray")
+}
+```
+# Conclusion
+This project aims to apply different machine learning models to predict activity type (especially "falling") using six biometric indicators. I applied decision trees, knn, random forest models in this project. The results showed that the random forest gave the best prediction with an overall accuracy of .77, which means the model correctly predicted 77% of the validation data. The accuracy, sensitivity, and specificity of predicting "falling" is .8138, .726, and .902, respectively. More advanced machine learning algorithms, such as Gradient boosted machines (GBMs), can be applied to predicting the activity type better and to avoiding overtraining.   
+
+# Reference
+Landis, J.R.; Koch, G.G. (1977). “The measurement of observer agreement for categorical data”. *Biometrics*, *33* (1): 159–174  
+
+Ozdemir, A. T., & Barshan, B. (2014). Detecting falls with wearable sensors using machine learning techniques. *Sensors*, *14*(6), 10691-10708.
