@@ -3,7 +3,7 @@ The assignment of the course Data Science: Capstone
 Classify six daily activity types using the Fall Detection Data from China (https://www.kaggle.com/pitasr/falldata/version/1#).
 
 
-falldeteciton.csv - The raw dat in .csv format
+falldeteciton.csv - The raw data set in .csv format
 
 OwnProj.pdf - The report in PDF format
 
